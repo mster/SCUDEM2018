@@ -14,7 +14,7 @@ air_density = 1.225 # kg/m^3
 c_drag_orthogonal = 1.28 #
 
 # environment parameters
-FAN_VELOCITY = 2 # m/s
+FAN_VELOCITY = 3 # m/s
 HEIGHT = 1 # meters
 THETA = 0 # completely horizontal = 0 
 
@@ -56,41 +56,58 @@ def max_acclr_from_fan(row, v, A, m):
 def acclr_from_fan(row, v, A, m, phi_body):
 	max_acclr = max_acclr_from_fan(row=row, v=v, A=A, m=m)
 	dist_acclr = max_acclr*(np.cos(phi_body)) # [1, 0, 1]% force depending on phi
-	return dist_acclr
+	return [ dist_acclr*np.cos(phi_body), dist_acclr * np.sin(phi_body) ]
 
 def max_drag_force_on_body(Cd, row, v, A):
-	max_drag = (Cd * (0.5) * row * (v ** 2) * A)
-	return max_drag
+	v_mag = (v[0] ** 2 + v[1] ** 2) ** 0.5
+	max_drag = (Cd * (0.5) * row * (v_mag ** 2) * A)
+	#max_drag_x = (Cd * (0.5) * row * (v[0] ** 2) * A)
+	#max_drag_y = (Cd * (0.5) * row * (v[1] ** 2) * A)
+	#return [ max_drag_x, max_drag_y ] 
+
+	return max_drag 
 
 def drag_acclr_on_body(Cd, row, v_body, A, m, phi_body):
 	max_drag = max_drag_force_on_body(Cd=Cd, row=row, v=v_body, A=A)
 	dist_drag_acclr = (max_drag / m) * (np.cos(phi_body)) # [1, 0, 1]% drag depending on phi
 	return dist_drag_acclr
 
-def velocity(vi, t, A, m, phi_body, Cd, row):
-	a = acclr(Cd=Cd, row=row, v_body=vi, A=A, m=m, phi_body=phi_body)
-	v = vi + (a * t)
-	return v
-
 def acclr(Cd, row, v_body, A, m, phi_body):
-	body_acclr = acclr_from_fan(row=row, v=FAN_VELOCITY, A=A, m=m, phi_body=phi_body)
-	drag_acclr = drag_acclr_on_body(Cd=Cd, row=row, v_body=v_body, A=A, m=m, phi_body=phi_body)
-	acclr = body_acclr - drag_acclr
+	max_drag = max_drag_force_on_body(Cd=Cd, row=row, v=v_body, A=A)
+	max_fan = max_pressure_force_from_fan(row=row, v=FAN_VELOCITY, A=A)
+
+	#drag_acclr = max_drag
+	drag_acclr = [ (max_drag * np.cos(phi_body) / m), (max_drag * np.sin(phi_body) / m) ]
+	fan_acclr = (max_fan / m) * np.cos(phi_body)
+
+
+	acclr_x = (fan_acclr * np.cos(phi_body) - drag_acclr[0])
+	acclr_y = (fan_acclr * np.sin(phi_body) - drag_acclr[1]) - g
+	acclr = [ acclr_x, acclr_y ]
+	#body_acclr = acclr_from_fan(row=row, v=FAN_VELOCITY, A=A, m=m, phi_body=phi_body)
+	#drag_acclr = drag_acclr_on_body(Cd=Cd, row=row, v_body=v_body, A=A, m=m, phi_body=phi_body)
 	#print('%s %s' % (body_acclr, drag_acclr))
 	return acclr
 
+def velocity(vi, t, A, m, phi_body, Cd, row):
+	a = acclr(Cd=Cd, row=row, v_body=vi, A=A, m=m, phi_body=phi_body)
+	v_x = vi[0] + a[0] * t
+	v_y = vi[1] + a[1] * t
+	# if v_y < -20:
+	# 	v_y = -20
+	v = [ v_x, v_y ]
+	return v
+
 def position(t_step, t_cur, xi, yi, vi, A, m, phi_body, Cd, row):
 	v = velocity(vi=vi, t=t_step, A=A, m=m, phi_body=phi_body, Cd=Cd, row=row)
-	v_x = v * np.cos(phi_body)
-	v_y = v * np.sin(phi_body)
-	x = xi + (v * v_x * t_step)
-	y = yi + (v * v_y * t_step) - (g * t_cur) * t_cur * 0.5
-	v = (v_x**2 + v_y**2)*(0.5)
-	return [ x, y, v ]
+	#print(v)
+	x = xi + (v[0] * t_step)
+	y = yi + (v[1] * t_step)
+	return [ x, y, v[0], v[1] ] 
 
 t_cur = 0
-t_max = 1
-t_step = 0.01
+t_max = 0.5
+t_step = 0.0005
 
 fig = plot.figure(1)
 ax = plot.axes(projection='3d')
@@ -99,43 +116,46 @@ ax = plot.axes(projection='3d')
 '''
 	Paper
 '''
-correction_constant = 10
-#theta = [-pi/2, -pi/3, -pi/4, 0, pi/4, pi/3, pi/2]
-for t in np.linspace(-np.pi/2, np.pi/2, 20):
+correction_constant = int(t_max/t_step) / 100
+theta_pool = np.linspace(-np.pi/2, np.pi/2, 10)
+for t in theta_pool:
 	n = 0
 	phi_cur = t # modify later
-	pos_cache_ = np.zeros((int(t_max/t_step), 3), dtype=np.float64)
-	print(pos_cache_.shape)
+	pos_cache_ = np.zeros((int(t_max/t_step), 4), dtype=np.float64)
 	pos_cache_[0,0] = p0[0]
 	pos_cache_[0,1] = p0[1]
-	pos_cache_[0,2] = (v0[0]** 2 + v0[1] ** 2)
+	pos_cache_[0,2] = v0[0]
+	pos_cache_[0,3] = v0[1]
 
 	t_cur = t_step
 	while t_cur < t_max:
-		n = int(t_cur/t_step)
-		print(n)
+		n += 1
 		x_l = pos_cache_[n-1,0]
 		y_l = pos_cache_[n-1,1]
-		v_l = pos_cache_[n-1,2]
-		#print("%s %s %s %s" % (n, x_l, y_l, v_l))
-		if y_l < 0:
-			t_max = t_cur
+		v_i = [ pos_cache_[n-1,2], pos_cache_[n-1,3] ]
+		#print("%s %s %s %s" % (n, x_l, y_l, v_i))
 
 		cur_pos = position(t_step=t_step, t_cur=t_cur, xi=x_l, yi=y_l,
-		 vi=v_l, A=SURFACE_AREA[0], m=MASS[0], phi_body=phi_cur,
+		 vi=v_i, A=SURFACE_AREA[0], m=MASS[0], phi_body=phi_cur,
 		  Cd=c_drag_orthogonal, row=air_density)
 
 		# minor oscillation
-		if phi_cur is not 0:
-			phi_cur = phi_cur - (1 / correction_constant) * phi_cur
+		if phi_cur > 0:
+			phi_cur = phi_cur - (1 / correction_constant) * (phi_cur)
+		elif phi_cur < 0:
+			phi_cur = phi_cur + (1 / correction_constant) * np.abs(phi_cur)
 
 		pos_cache_[n,0] = cur_pos[0]
 		pos_cache_[n,1] = cur_pos[1]
 		pos_cache_[n,2] = cur_pos[2]
+		pos_cache_[n,3] = cur_pos[3]
 
 		t_cur = t_cur + t_step
 
-	pp.pprint(pos_cache_)
+		if(cur_pos[1] < 0):
+			t_cur = t_max
+
+	#pp.pprint(pos_cache_)
 
 	time = np.arange(int(t_max/t_step))
 	time = np.dot(time,t_step)
