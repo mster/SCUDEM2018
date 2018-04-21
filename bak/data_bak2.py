@@ -18,6 +18,12 @@ FAN_VELOCITY = 1 # m/s
 HEIGHT = 0.5 # meters
 THETA = 0 # completely horizontal = 0 
 
+# randomness control
+VARIENCE = 0
+
+# assumptions
+INFLUENCE_TIME = 0.125 # acceptable range to assume that the orientation will not change
+
 # materials parameters
 MASS = [
 	0.7474 / 1000, # mass of paper in kilograms = grams / 1000 
@@ -122,14 +128,13 @@ for t in theta_pool:
 		#print("%s %s %s %s" % (n, x_l, y_l, v_i))
 
 		cur_pos = position(t_step=t_step, t_cur=t_cur, xi=x_l, yi=y_l,
-		 vi=v_i, A=SURFACE_AREA[0], m=MASS[0], phi_body=phi_cur,
+		 vi=v_i, A=SURFACE_AREA[0], m=MASS[1], phi_body=phi_cur,
 		  Cd=c_drag_orthogonal, row=air_density)
 
-		# orientation correction per step if not orthogonal to flow
+		# minor oscillation
 		if phi_cur != 0.0:
 			phi_cur = phi_cur - (1 / correction_constant) * (phi_cur)
 
-		# storing past position and velocity data
 		pos_cache_[n,0] = cur_pos[0]
 		pos_cache_[n,1] = cur_pos[1]
 		pos_cache_[n,2] = cur_pos[2]
@@ -140,6 +145,9 @@ for t in theta_pool:
 			pos_cache_[n,0] = pos_cache_[n-1,0]
 
 		t_cur = t_cur + t_step
+
+
+	#pp.pprint(pos_cache_)
 
 	time = np.arange(int(t_max/t_step))
 	time = np.dot(time,t_step)
@@ -152,7 +160,6 @@ for t in theta_pool:
 	rgb = (color,0,1-color)
 	t_cur = 0
 
-ax.view_init(25,-70)
 ax.set_xlabel('X')
 ax.set_ylabel('Time')
 ax.set_zlabel('Y')
