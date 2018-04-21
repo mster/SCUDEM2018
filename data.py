@@ -14,8 +14,8 @@ air_density = 1.225 # kg/m^3
 c_drag_orthogonal = 1.28 #
 
 # environment parameters
-FAN_VELOCITY = 3 # m/s
-HEIGHT = 1 # meters
+FAN_VELOCITY = 1 # m/s
+HEIGHT = 0.5 # meters
 THETA = 0 # completely horizontal = 0 
 
 # randomness control
@@ -44,46 +44,45 @@ v0 = [
 	0,
 ]
 
+t_cur = 0
+t_max = 1
+t_step = 0.001
+correction_constant = 50
+
 # functions
 def max_pressure_force_from_fan(row, v, A):
 	return (row * (v ** 2) * A)
 
-def max_acclr_from_fan(row, v, A, m):
-	F_max = max_pressure_force_from_fan(row=row, v=v, A=A)
-	max_acclr = F_max / m
-	return max_acclr
+def dp(row, v, Cd, phi_body):
+	max_dp = Cd * row * (v**2) * (0.5)
+	pressure_differential = max_dp * np.cos(phi_body)
+	return pressure_differential
 
-def acclr_from_fan(row, v, A, m, phi_body):
-	max_acclr = max_acclr_from_fan(row=row, v=v, A=A, m=m)
-	dist_acclr = max_acclr*(np.cos(phi_body)) # [1, 0, 1]% force depending on phi
-	return [ dist_acclr*np.cos(phi_body), dist_acclr * np.sin(phi_body) ]
+def force_from_fan(row, v, Cd, phi_body, A):
+	dp_fan = dp(row=row, v=v, Cd=Cd, phi_body=phi_body)
+	F_x = dp_fan * A * np.cos(phi_body)
+	F_y = dp_fan * A * np.sin(phi_body)
+	return [ F_x, F_y ]
 
-def max_drag_force_on_body(Cd, row, v, A):
-	v_mag = (v[0] ** 2 + v[1] ** 2) ** 0.5
-	max_drag = (Cd * (0.5) * row * (v_mag ** 2) * A)
-	#max_drag_x = (Cd * (0.5) * row * (v[0] ** 2) * A)
-	#max_drag_y = (Cd * (0.5) * row * (v[1] ** 2) * A)
-	#return [ max_drag_x, max_drag_y ] 
+def force_from_drag(row, v, Cd, phi_body, A):
+	dp_drag_x = dp(row=row, v=v[0], Cd=Cd, phi_body=phi_body)
+	dp_drag_y = dp(row=row, v=v[1], Cd=Cd, phi_body=phi_body)
 
-	return max_drag 
-
-def drag_acclr_on_body(Cd, row, v_body, A, m, phi_body):
-	max_drag = max_drag_force_on_body(Cd=Cd, row=row, v=v_body, A=A)
-	dist_drag_acclr = (max_drag / m) * (np.cos(phi_body)) # [1, 0, 1]% drag depending on phi
-	return dist_drag_acclr
+	F_x = dp_drag_x * A * np.cos(phi_body) - dp_drag_y * A * np.cos(phi_body)
+	F_y = dp_drag_y * A * np.sin(phi_body) + dp_drag_x * A * np.sin(phi_body)
+	return [ F_x, F_y ]
 
 def acclr(Cd, row, v_body, A, m, phi_body):
-	max_drag = max_drag_force_on_body(Cd=Cd, row=row, v=v_body, A=A)
-	max_fan = max_pressure_force_from_fan(row=row, v=FAN_VELOCITY, A=A)
-
-	#drag_acclr = max_drag
-	drag_acclr = [ (max_drag * np.cos(phi_body) / m), (max_drag * np.sin(phi_body) / m) ]
-	fan_acclr = (max_fan / m) * np.cos(phi_body)
+	fan_force_components = force_from_fan(row=row, v=FAN_VELOCITY, Cd=Cd, phi_body=phi_body, A=A)
+	drag_force_components = force_from_drag(row=row, v=v_body, Cd=Cd, phi_body=phi_body, A=A)
+	F_x_net = fan_force_components[0] - drag_force_components[0]
+	F_y_net = fan_force_components[1] - drag_force_components[1]
 
 
-	acclr_x = (fan_acclr * np.cos(phi_body) - drag_acclr[0])
-	acclr_y = (fan_acclr * np.sin(phi_body) - drag_acclr[1]) - g
+	acclr_x = (F_x_net / m)
+	acclr_y = (F_y_net / m) - g
 	acclr = [ acclr_x, acclr_y ]
+	print(acclr)
 	#body_acclr = acclr_from_fan(row=row, v=FAN_VELOCITY, A=A, m=m, phi_body=phi_body)
 	#drag_acclr = drag_acclr_on_body(Cd=Cd, row=row, v_body=v_body, A=A, m=m, phi_body=phi_body)
 	#print('%s %s' % (body_acclr, drag_acclr))
@@ -105,10 +104,6 @@ def position(t_step, t_cur, xi, yi, vi, A, m, phi_body, Cd, row):
 	y = yi + (v[1] * t_step)
 	return [ x, y, v[0], v[1] ] 
 
-t_cur = 0
-t_max = 0.5
-t_step = 0.0005
-
 fig = plot.figure(1)
 ax = plot.axes(projection='3d')
 
@@ -116,7 +111,6 @@ ax = plot.axes(projection='3d')
 '''
 	Paper
 '''
-correction_constant = int(t_max/t_step) / 100
 theta_pool = np.linspace(-np.pi/2, np.pi/2, 10)
 for t in theta_pool:
 	n = 0
@@ -140,10 +134,8 @@ for t in theta_pool:
 		  Cd=c_drag_orthogonal, row=air_density)
 
 		# minor oscillation
-		if phi_cur > 0:
+		if phi_cur != 0.0:
 			phi_cur = phi_cur - (1 / correction_constant) * (phi_cur)
-		elif phi_cur < 0:
-			phi_cur = phi_cur + (1 / correction_constant) * np.abs(phi_cur)
 
 		pos_cache_[n,0] = cur_pos[0]
 		pos_cache_[n,1] = cur_pos[1]
